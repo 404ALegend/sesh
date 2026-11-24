@@ -23,11 +23,8 @@ func tmuxStrategy(c *RealConnector, name string) (model.Connection, error) {
 
 func connectToTmux(c *RealConnector, connection model.Connection, opts model.ConnectOpts) (string, error) {
 	if connection.New {
-		// Everything below assumes the session now exists, so a failure here
-		// makes the rest meaningless — and it is how "tmux isn't on the PATH"
-		// first shows up when sesh is launched from a GUI app.
-		if _, err := c.mux.NewSession(connection.Session.Name, connection.Session.Path); err != nil {
-			return "", fmt.Errorf("failed to create tmux session %q: %w", connection.Session.Name, err)
+		if err := c.createSession(connection.Session); err != nil {
+			return "", err
 		}
 		if opts.Command != "" {
 			c.mux.SendKeys(connection.Session.Name, opts.Command)

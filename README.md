@@ -487,7 +487,11 @@ See my video, [Top 4 Fuzzy CLIs](https://www.youtube.com/watch?v=T0O2qrOhauY) fo
 
 #### sesh picker
 
-Sesh has a built-in picker that can be used as a tmux popup:
+Run `sesh picker` directly in a terminal. It uses the multiplexer configured in
+`sesh.toml`; no external selector is required. With `multiplexer = "tuios"`,
+selecting a directory creates or reconnects to its TUIOS session.
+
+For a tmux popup, bind the same command:
 
 ```sh
 bind-key "K" display-popup -h 90% -w 50% -E "sesh picker -i"

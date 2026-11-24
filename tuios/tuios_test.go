@@ -85,7 +85,7 @@ func TestListSessionsAcceptsSavedSessionsWhenDaemonIsStopped(t *testing.T) {
 
 func TestNewSessionStartsDaemonHeadlesslyAtRequestedDirectory(t *testing.T) {
 	tuios := NewTUIOS(testOS{}, testShell{
-		cmd: func(cmd string, args ...string) (string, error) {
+		cmdCapture: func(cmd string, args ...string) (string, error) {
 			assert.Equal(t, "tuios", cmd)
 			assert.Equal(t, []string{"new", "project space", "--cwd", "/repo with spaces", "--detach"}, args)
 			return "", nil
@@ -96,6 +96,19 @@ func TestNewSessionStartsDaemonHeadlesslyAtRequestedDirectory(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "project space", name)
+}
+
+func TestNewSessionReturnsCaptureError(t *testing.T) {
+	tuios := NewTUIOS(testOS{}, testShell{
+		cmdCapture: func(string, ...string) (string, error) {
+			return "", assert.AnError
+		},
+	}, "")
+
+	name, err := tuios.NewSession("invalid/name", "/repo")
+
+	require.ErrorIs(t, err, assert.AnError)
+	assert.Empty(t, name)
 }
 
 func TestSwitchOrAttachAttachesOutsideTUIOS(t *testing.T) {

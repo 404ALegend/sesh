@@ -145,7 +145,7 @@ func (b *BaseDeps) BuildAll(configPath string) (*Deps, error) {
 	}
 
 	s := startup.NewStartup(config, usedLister, t, b.Home, b.Replacer)
-	n := namer.NewNamer(b.Path, b.Git, b.Home, config)
+	n := namer.NewNamer(b.Path, b.Git, b.Home, config, t.Name())
 	c := connector.NewConnector(config, b.Dir, b.Home, usedLister, n, s, t, b.Zoxide, ti, b.Focuser)
 	ic := icon.NewIcon(config, t.Name())
 	p := previewer.NewPreviewer(usedLister, t, ic, b.Dir, b.Home, l, config, b.Shell)

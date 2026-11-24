@@ -21,14 +21,16 @@ type RealNamer struct {
 	git      git.Git
 	home     home.Home
 	config   model.Config
+	backend  string
 }
 
-func NewNamer(pathwrap pathwrap.Path, git git.Git, home home.Home, config model.Config) Namer {
+func NewNamer(pathwrap pathwrap.Path, git git.Git, home home.Home, config model.Config, backend string) Namer {
 	return &RealNamer{
 		pathwrap: pathwrap,
 		git:      git,
 		home:     home,
 		config:   config,
+		backend:  backend,
 	}
 }
 
@@ -51,8 +53,8 @@ func (n *RealNamer) Name(path string) (string, error) {
 		}
 		// A strategy only wins if its output survives normalization. A rule
 		// that rewrites the path to whitespace, for example, collapses to
-		// nothing here and must not be handed to tmux as a session name.
-		if valid := convertToValidName(name); valid != "" {
+		// nothing here and must not be handed to the backend as a session name.
+		if valid := convertToValidName(name, n.backend); valid != "" {
 			return valid, nil
 		}
 	}
@@ -76,7 +78,7 @@ func (n *RealNamer) RootName(path string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if valid := convertToValidName(name); valid != "" {
+		if valid := convertToValidName(name, n.backend); valid != "" {
 			return valid, nil
 		}
 	}

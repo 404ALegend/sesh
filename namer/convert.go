@@ -2,9 +2,17 @@ package namer
 
 import "strings"
 
-func convertToValidName(name string) string {
-	validName := strings.ReplaceAll(name, ".", "_")
-	validName = strings.ReplaceAll(validName, ":", "_")
-	validName = strings.Join(strings.Fields(validName), "_")
-	return validName
+var (
+	defaultNameReplacer = strings.NewReplacer(".", "_", ":", "_")
+	tuiosNameReplacer   = strings.NewReplacer(".", "_", ":", "_", "%", "%25", "/", "%2F", `\`, "%5C")
+)
+
+func convertToValidName(name, backend string) string {
+	replacer := defaultNameReplacer
+	if backend == "tuios" {
+		// TUIOS uses the session name as a state filename. Escape the
+		// separators and the escape marker so their spellings stay distinct.
+		replacer = tuiosNameReplacer
+	}
+	return strings.Join(strings.Fields(replacer.Replace(name)), "_")
 }

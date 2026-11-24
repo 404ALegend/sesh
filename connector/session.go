@@ -48,11 +48,18 @@ func (c *RealConnector) ensureSession(name string) (model.SeshSession, error) {
 		}
 		return connection.Session, nil
 	}
-	if _, err := c.mux.NewSession(connection.Session.Name, connection.Session.Path); err != nil {
-		return model.SeshSession{}, fmt.Errorf("failed to create tmux session: %w", err)
+	if err := c.createSession(connection.Session); err != nil {
+		return model.SeshSession{}, err
 	}
 	c.startup.Exec(connection.Session)
 	return connection.Session, nil
+}
+
+func (c *RealConnector) createSession(session model.SeshSession) error {
+	if _, err := c.mux.NewSession(session.Name, session.Path); err != nil {
+		return fmt.Errorf("failed to create session %q: %w", session.Name, err)
+	}
+	return nil
 }
 
 // focusSession brings the client to a session, honouring the same

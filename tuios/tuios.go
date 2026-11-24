@@ -100,8 +100,10 @@ func (s session) toModel() *model.TmuxSession {
 }
 
 func (t *TUIOS) NewSession(sessionName string, startDir string) (string, error) {
-	_, err := t.shell.Cmd(t.bin, "new", sessionName, "--cwd", startDir, "--detach")
-	return sessionName, err
+	if _, err := t.shell.CmdCapture(t.bin, "new", sessionName, "--cwd", startDir, "--detach"); err != nil {
+		return "", err
+	}
+	return sessionName, nil
 }
 
 func (t *TUIOS) RenameSession(target string, newName string) (string, error) {

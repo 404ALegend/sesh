@@ -67,6 +67,19 @@ func TestEstablishTmuxConnection(t *testing.T) {
 	})
 }
 
+func TestConnectReportsSessionCreationFailure(t *testing.T) {
+	m := tmux.NewMockTmux(t)
+	cause := errors.New("tuios: invalid session name")
+	m.EXPECT().NewSession("invalid/name", "/repo").Return("", cause)
+	c := &RealConnector{mux: m}
+	conn := model.Connection{New: true, Session: model.SeshSession{Name: "invalid/name", Path: "/repo"}}
+
+	_, err := connectToTmux(c, conn, model.ConnectOpts{})
+
+	require.ErrorIs(t, err, cause)
+	assert.EqualError(t, err, `failed to create session "invalid/name": tuios: invalid session name`)
+}
+
 func TestConnectToTmuxDetachedSwitchesClientAndFocuses(t *testing.T) {
 	mTmux := tmux.NewMockTmux(t)
 	mFocuser := focuser.NewMockFocuser(t)
