@@ -98,8 +98,8 @@
     },
     "multiplexer": {
       "type": "string",
-      "enum": ["auto", "tmux", "herdr"],
-      "description": "Which multiplexer backend sessions live in. \"auto\" picks herdr when sesh runs inside a herdr pane (HERDR_ENV is set) and tmux everywhere else",
+      "enum": ["auto", "tmux", "herdr", "tuios"],
+      "description": "Which multiplexer backend sessions live in. \"auto\" picks TUIOS from a TUIOS pane, herdr from a herdr pane, and tmux everywhere else",
       "default": "auto"
     },
     "tmux_command": {

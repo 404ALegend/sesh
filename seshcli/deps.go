@@ -37,6 +37,7 @@ import (
 	"github.com/joshmedeski/sesh/v2/startup"
 	"github.com/joshmedeski/sesh/v2/tmux"
 	"github.com/joshmedeski/sesh/v2/tmuxinator"
+	"github.com/joshmedeski/sesh/v2/tuios"
 	"github.com/joshmedeski/sesh/v2/worktree"
 	"github.com/joshmedeski/sesh/v2/zoxide"
 )
@@ -199,19 +200,23 @@ func buildDeps(cmd *cobra.Command, base *BaseDeps) (*Deps, error) {
 }
 
 // selectMux picks the multiplexer backend. "auto" follows the environment:
-// inside a herdr pane sesh drives herdr, everywhere else tmux, so one config
-// works for a user who runs both.
+// inside a TUIOS or herdr pane sesh drives that backend, everywhere else tmux.
 func selectMux(config model.Config, os oswrap.Os, sh shell.Shell) mux.Mux {
 	choice := config.Multiplexer
 	if choice == "" || choice == "auto" {
 		choice = "tmux"
-		if os.Getenv("HERDR_ENV") != "" || os.Getenv("HERDR_WORKSPACE_ID") != "" {
+		switch {
+		case os.Getenv("TUIOS_SESSION") != "" || os.Getenv("TUIOS_PANE_ID") != "":
+			choice = tuios.Name
+		case os.Getenv("HERDR_ENV") != "" || os.Getenv("HERDR_WORKSPACE_ID") != "":
 			choice = herdr.Name
 		}
 	}
 	switch choice {
 	case herdr.Name:
 		return herdr.NewHerdr(os, sh, herdr.NewSocketClient(herdr.SocketPath(os)), "")
+	case tuios.Name:
+		return tuios.NewTUIOS(os, sh, "")
 	default:
 		return tmux.NewTmux(os, sh, config.TmuxCommand)
 	}
