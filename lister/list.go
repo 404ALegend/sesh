@@ -2,6 +2,7 @@ package lister
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"sync"
 
@@ -39,20 +40,67 @@ var srcStrategies = map[string]srcStrategy{
 	"tmux-pane":  listTmuxPanes,
 }
 
+// ListSources fetches the named sources concurrently. Unknown names fail
+// before any strategy starts.
+func (l *RealLister) ListSources(sources []string) (SourceResults, error) {
+	for _, src := range sources {
+		if _, ok := srcStrategies[src]; !ok {
+			return nil, fmt.Errorf("unknown source %q", src)
+		}
+	}
+	results := make(SourceResults, len(sources))
+	if len(sources) == 0 {
+		return results, nil
+	}
+	ch := make(chan strategyResult, len(sources))
+	for _, src := range sources {
+		go func() {
+			sessions, err := srcStrategies[src](l)
+			ch <- strategyResult{source: src, sessions: sessions, err: err}
+		}()
+	}
+	var firstErr error
+	for range sources {
+		result := <-ch
+		if firstErr == nil {
+			firstErr = result.err
+		}
+		results[result.source] = result.sessions
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return results, nil
+}
+
 func (l *RealLister) List(opts ListOptions) (model.SeshSessions, error) {
+	return l.ListWith(opts, nil)
+}
+
+// ListWith takes requested sources from fetched when present, even if empty.
+// Unrequested sources cannot influence ordering or filtering.
+func (l *RealLister) ListWith(opts ListOptions, fetched SourceResults) (model.SeshSessions, error) {
 	fullDirectory := make(model.SeshSessionMap)
 	fullOrderedIndex := make([]string, 0)
 
 	srcGroups := groupSources(srcs(opts), l.config.SortOrder)
 	srcsOrderedIndex := slices.Concat(srcGroups...)
 
-	resultsChan := make(chan strategyResult, len(srcsOrderedIndex))
-	var wg sync.WaitGroup
+	missing := srcsOrderedIndex
+	if len(fetched) != 0 {
+		missing = make([]string, 0, len(srcsOrderedIndex))
+		for _, src := range srcsOrderedIndex {
+			if _, ok := fetched[src]; !ok {
+				missing = append(missing, src)
+			}
+		}
+	}
 
 	// Window names are display-only and fetched once for all sessions, in
 	// parallel with the source strategies, so they never cost a tmux call per
 	// session.
 	var windowNames map[string][]string
+	var wg sync.WaitGroup
 	if l.config.TUI.ShowWindows && slices.Contains(srcsOrderedIndex, "tmux") {
 		wg.Add(1)
 		go func() {
@@ -61,25 +109,15 @@ func (l *RealLister) List(opts ListOptions) (model.SeshSessions, error) {
 		}()
 	}
 
-	for _, src := range srcsOrderedIndex {
-		wg.Add(1)
-		go func(s string) {
-			defer wg.Done()
-			sessions, err := srcStrategies[s](l)
-			resultsChan <- strategyResult{source: s, sessions: sessions, err: err}
-		}(src)
-	}
-
+	resultsMap, err := l.ListSources(missing)
 	wg.Wait()
-	close(resultsChan)
-
-	// Collect results into a map for easy lookup
-	resultsMap := make(map[string]model.SeshSessions)
-	for res := range resultsChan {
-		if res.err != nil {
-			return model.SeshSessions{}, res.err
+	if err != nil {
+		return model.SeshSessions{}, err
+	}
+	for _, src := range srcsOrderedIndex {
+		if sessions, ok := fetched[src]; ok {
+			resultsMap[src] = sessions
 		}
-		resultsMap[res.source] = res.sessions
 	}
 
 	// The directory is filled first so a merged group can look a session up by

@@ -23,6 +23,16 @@ type Lister interface {
 	FindTmuxinatorConfig(name string) (model.SeshSession, bool)
 }
 
+// SourceResults holds raw sessions keyed by source name.
+type SourceResults map[string]model.SeshSessions
+
+// SourceLister can assemble a list from both live and previously fetched sources.
+type SourceLister interface {
+	Lister
+	ListSources(sources []string) (SourceResults, error)
+	ListWith(opts ListOptions, fetched SourceResults) (model.SeshSessions, error)
+}
+
 type RealLister struct {
 	config     model.Config
 	home       home.Home
@@ -37,7 +47,7 @@ type RealLister struct {
 	wildcards     []expandedWildcard
 }
 
-func NewLister(config model.Config, home home.Home, m mux.Mux, zoxide zoxide.Zoxide, tmuxinator tmuxinator.Tmuxinator) Lister {
+func NewLister(config model.Config, home home.Home, m mux.Mux, zoxide zoxide.Zoxide, tmuxinator tmuxinator.Tmuxinator) SourceLister {
 	return &RealLister{
 		config:     config,
 		home:       home,

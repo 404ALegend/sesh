@@ -807,30 +807,19 @@ and the groups no longer line up with contiguous ranges.
 > [!WARNING]
 > This feature is experimental and may not work as expected.
 
-Sesh can cache session lists to speed up repeated calls. Caching is opt-in and disabled by default. When enabled, sesh stores results at `$XDG_CACHE_HOME/sesh/sessions.gob` (default `~/.cache/sesh/sessions.gob`) and uses a stale-while-revalidate strategy with a 5-second TTL:
-
-- **Cold start**: no cache exists, fetches live data and writes the cache
-- **Fresh hit** (within 5s): returns cached data instantly
-- **Stale hit** (after 5s): returns cached data instantly and refreshes the cache in the background
-
-The cache is also refreshed automatically after `sesh connect`.
+Caching is opt-in and disabled by default. Only zoxide and tmuxinator results
+are stored in `$XDG_CACHE_HOME/sesh/sessions.v2.gob` (default:
+`~/.cache/sesh/sessions.v2.gob`). On a cache hit older than five seconds,
+Sesh uses those results for the current list and refreshes them in the background.
 
 ```toml
 cache = true
 ```
 
-Sessions created or killed outside `sesh connect` (e.g. plain `tmux new-session`, closing a session's last window) are missing from the cache until the next stale-hit refresh. To keep the cache current, run `sesh cache refresh` when those events happen — it fetches live data and rewrites the cache, and does nothing when the cache is disabled. With tmux hooks this covers both events:
-
-```sh
-set-hook -g session-created 'run-shell -b "sesh cache refresh"'
-set-hook -g session-closed  'run-shell -b "sesh cache refresh"'
-```
-
-If you use a kill binding in an fzf picker (like `ctrl-d` in the example above), refresh the cache before reloading the list so the killed session disappears immediately:
-
-```sh
---bind 'ctrl-d:execute(tmux kill-session -t {2..}; sesh cache refresh)+change-prompt(⚡  )+reload(sesh list --icons)' \
-```
+Multiplexer sessions and config entries are always listed live. A newly created
+TUIOS session is selectable on the next `sesh picker` launch, with no hook or
+manual refresh. For changes made directly in zoxide or tmuxinator, use
+`sesh cache refresh` to update the cached entries immediately.
 
 ### Picker TUI
 

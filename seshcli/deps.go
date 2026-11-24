@@ -160,7 +160,7 @@ func (b *BaseDeps) BuildAll(configPath string) (*Deps, error) {
 	// when caching is off: the picker refetches every time anyway.
 	var refreshCache picker.CacheRefreshFunc
 	if cachedLi != nil {
-		refreshCache = func() { cachedLi.RefreshCache(lister.ListOptions{}) }
+		refreshCache = cachedLi.RefreshCache
 	}
 	pk := picker.NewPicker(config, p, b.Home, usedLister, b.Zoxide, refreshCache)
 	mk := mkdirer.NewMkdirer(b.Os, b.Home, c)

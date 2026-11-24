@@ -12,150 +12,117 @@ import (
 
 const softTTL = 5 * time.Second
 
-// CachingLister wraps a Lister with stale-while-revalidate caching for List().
-// All other Lister methods delegate directly to the inner lister.
+// Mux sessions and panes must stay live; config comes from the current config.
+var cachedSources = []string{"tmuxinator", "zoxide"}
+
+// CachingLister serves slow sources from cache and delegates assembly to inner.
 type CachingLister struct {
-	inner Lister
+	inner SourceLister
 	cache cache.Cache
 	wg    sync.WaitGroup
 }
 
 // NewCachingLister creates a CachingLister that decorates inner with file-based caching.
-func NewCachingLister(inner Lister, c cache.Cache) *CachingLister {
+func NewCachingLister(inner SourceLister, c cache.Cache) *CachingLister {
 	return &CachingLister{inner: inner, cache: c}
 }
 
-// List implements Lister. It returns cached data when available, triggering a
-// background refresh when the cache is older than the soft TTL.
-// The cache always stores the full unfiltered list; source filters,
-// HideDuplicates, and HideAttached are applied after reading from cache.
+// List uses stale-while-revalidate caching only when a cached source is requested.
 func (cl *CachingLister) List(opts ListOptions) (model.SeshSessions, error) {
-	// Always fetch/store the full list (all sources, no dedup, no hide);
-	// we apply all view-level filters ourselves after cache read.
-	innerOpts := ListOptions{}
+	requested := srcs(opts)
+	if !slices.ContainsFunc(cachedSources, func(src string) bool { return slices.Contains(requested, src) }) {
+		return cl.inner.ListWith(opts, nil)
+	}
 
 	cached, err := cl.cache.Read()
 	if err == nil {
 		age := time.Since(cached.Timestamp)
 		if age < softTTL {
 			slog.Debug("cache: hit (fresh)", "age", age)
-			return cl.applyFilters(cached.Sessions, opts), nil
+		} else {
+			slog.Debug("cache: hit (stale, revalidating)", "age", age)
+			cl.RefreshCache()
 		}
-		// Stale -- return immediately but revalidate in background
-		slog.Debug("cache: hit (stale, revalidating)", "age", age)
-		cl.wg.Add(1)
-		go func() {
-			defer cl.wg.Done()
-			cl.revalidate(innerOpts)
-		}()
-		return cl.applyFilters(cached.Sessions, opts), nil
+		return cl.inner.ListWith(opts, splitBySource(cached.Sessions))
 	}
 
 	// Cold start -- fetch synchronously
 	slog.Debug("cache: miss (cold start)")
-	sessions, err := cl.inner.List(innerOpts)
+	fetched, err := cl.inner.ListSources(cachedSources)
 	if err != nil {
-		return sessions, err
-	}
-	if writeErr := cl.cache.Write(sessions); writeErr != nil {
-		slog.Warn("cache: write failed on cold start", "error", writeErr)
-	}
-	return cl.applyFilters(sessions, opts), nil
-}
-
-// applyFilters applies view-level filters that should not affect what gets
-// stored in the cache: source filtering, HideDuplicates, and HideAttached.
-func (cl *CachingLister) applyFilters(sessions model.SeshSessions, opts ListOptions) model.SeshSessions {
-	filtered := sessions.OrderedIndex
-
-	// 1. Source filtering: if any source flag is set, keep only matching sessions.
-	if allowed := sourceSet(opts); allowed != nil {
-		result := make([]string, 0, len(filtered))
-		for _, index := range filtered {
-			if allowed[sessions.Directory[index].Src] {
-				result = append(result, index)
+		for _, src := range cachedSources {
+			if !slices.Contains(requested, src) {
+				// A source this list doesn't need may have failed. Only errors
+				// from the requested sources should prevent this list.
+				return cl.inner.ListWith(opts, nil)
 			}
 		}
-		filtered = result
+		return model.SeshSessions{}, err
 	}
+	if err := cl.cache.Write(flatten(fetched)); err != nil {
+		slog.Warn("cache: write failed on cold start", "error", err)
+	}
+	return cl.inner.ListWith(opts, fetched)
+}
 
-	// 2. HideAttached runs before HideDuplicates so the attached tmux
-	// session is removed from the dedup input. Otherwise tmux would win
-	// the dedup against a same-named config/tmuxinator entry and then be
-	// hidden, leaving no entry for the user to pick.
-	if opts.HideAttached {
-		attached, ok := cl.inner.GetAttachedTmuxSession()
-		if ok {
-			for i, index := range filtered {
-				s := sessions.Directory[index]
-				if s.Src == "tmux" && s.Name == attached.Name {
-					filtered = slices.Delete(slices.Clone(filtered), i, i+1)
-					break
-				}
-			}
+// flatten stores only raw slow-source rows, preserving each source's order.
+func flatten(fetched SourceResults) model.SeshSessions {
+	size := 0
+	for _, src := range cachedSources {
+		size += len(fetched[src].OrderedIndex)
+	}
+	flat := model.SeshSessions{
+		Directory:    make(model.SeshSessionMap, size),
+		OrderedIndex: make([]string, 0, size),
+	}
+	for _, src := range cachedSources {
+		sessions := fetched[src]
+		flat.OrderedIndex = append(flat.OrderedIndex, sessions.OrderedIndex...)
+		for _, key := range sessions.OrderedIndex {
+			flat.Directory[key] = sessions.Directory[key]
 		}
 	}
-
-	// 3. HideDuplicates: per-source dedup rules (see applyDedup).
-	if opts.HideDuplicates {
-		filtered = applyDedup(model.SeshSessions{
-			OrderedIndex: filtered,
-			Directory:    sessions.Directory,
-		})
-	}
-
-	if len(filtered) == len(sessions.OrderedIndex) {
-		return sessions
-	}
-	return model.SeshSessions{
-		OrderedIndex: filtered,
-		Directory:    sessions.Directory,
-	}
+	return flat
 }
 
-// sourceSet returns a set of allowed source names based on opts, or nil if
-// no source flags are set (meaning all sources are allowed).
-func sourceSet(opts ListOptions) map[string]bool {
-	if !opts.Tmux && !opts.Config && !opts.Zoxide && !opts.Tmuxinator && !opts.Panes {
-		return nil
+// splitBySource marks even empty cached sources as already fetched. Rows for
+// other sources cannot override live data.
+func splitBySource(stored model.SeshSessions) SourceResults {
+	results := make(SourceResults, len(cachedSources))
+	for _, src := range cachedSources {
+		results[src] = model.SeshSessions{
+			Directory:    make(model.SeshSessionMap),
+			OrderedIndex: []string{},
+		}
 	}
-	m := make(map[string]bool)
-	if opts.Tmux {
-		m["tmux"] = true
+	for _, key := range stored.OrderedIndex {
+		session := stored.Directory[key]
+		if result, ok := results[session.Src]; ok {
+			result.Directory[key] = session
+			result.OrderedIndex = append(result.OrderedIndex, key)
+			results[session.Src] = result
+		}
 	}
-	if opts.Config {
-		m["config"] = true
-	}
-	if opts.Zoxide {
-		m["zoxide"] = true
-	}
-	if opts.Tmuxinator {
-		m["tmuxinator"] = true
-	}
-	if opts.Panes {
-		m["tmux-pane"] = true
-	}
-	return m
+	return results
 }
 
-func (cl *CachingLister) revalidate(opts ListOptions) {
-	sessions, err := cl.inner.List(opts)
+func (cl *CachingLister) revalidate() {
+	fetched, err := cl.inner.ListSources(cachedSources)
 	if err != nil {
 		slog.Warn("cache: background revalidation fetch failed", "error", err)
 		return
 	}
-	if err := cl.cache.Write(sessions); err != nil {
+	if err := cl.cache.Write(flatten(fetched)); err != nil {
 		slog.Warn("cache: background revalidation write failed", "error", err)
 	}
 }
 
-// RefreshCache fetches live data from the inner lister and writes it to the cache.
-// This bypasses the cache read entirely, intended for use after sesh connect.
-func (cl *CachingLister) RefreshCache(opts ListOptions) {
+// RefreshCache refreshes the cached sources in the background, without a cache read.
+func (cl *CachingLister) RefreshCache() {
 	cl.wg.Add(1)
 	go func() {
 		defer cl.wg.Done()
-		cl.revalidate(opts)
+		cl.revalidate()
 	}()
 }
 

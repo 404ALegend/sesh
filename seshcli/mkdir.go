@@ -5,7 +5,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/joshmedeski/sesh/v2/lister"
 	"github.com/joshmedeski/sesh/v2/model"
 )
 
@@ -38,7 +37,7 @@ func NewMkdirCommand(base *BaseDeps) *cobra.Command {
 			}
 			// Refresh cache in background so next sesh list has fresh data
 			if deps.CachingLister != nil {
-				deps.CachingLister.RefreshCache(lister.ListOptions{})
+				deps.CachingLister.RefreshCache()
 				deps.CachingLister.Wait()
 			}
 			return nil
